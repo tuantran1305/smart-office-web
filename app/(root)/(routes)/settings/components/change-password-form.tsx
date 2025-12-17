@@ -47,6 +47,8 @@ const ChangePasswordForm = () => {
     const token = localStorage.getItem("token");
     if (!token) {
       router.replace("/login");
+      setLoading(false);
+      return;
     }
     const { confirmNewPassword, ...req } = data;
     await thingsboard
