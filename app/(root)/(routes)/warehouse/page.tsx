@@ -23,8 +23,10 @@ export default function WarehouseListPage() {
     load();
   }, []);
 
+  type TbAttr = { key: string; value: any };
   const getVal = (key: string) => {
-    const item = Object.values(attr || {}).find((x: any) => x.key === key);
+    const list = (Array.isArray(attr) ? attr : Object.values(attr || {})) as TbAttr[];
+    const item = list.find((x) => x.key === key);
     return item?.value ?? "";
   };
 
