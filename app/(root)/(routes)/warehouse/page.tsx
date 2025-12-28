@@ -17,17 +17,17 @@ export default function WarehouseListPage() {
       await axios.post(`/api/telemetry/attribute`, {
         token,
         deviceId: (await import("@/lib/config")).config.deviceId,
-        keys: ["ware_house_1","material_1","ware_house_2","material_2"].join(","),
+        keys: ["1","2"].join(","),
       }).then((resp) => setAttr(resp.data)).catch(() => {});
     };
     load();
   }, []);
 
   type TbAttr = { key: string; value: any };
-  const getVal = (key: string) => {
+  const getObj = (key: string) => {
     const list = (Array.isArray(attr) ? attr : Object.values(attr || {})) as TbAttr[];
     const item = list.find((x) => x.key === key);
-    return item?.value ?? "";
+    return item?.value ?? {};
   };
 
   return (
@@ -39,16 +39,16 @@ export default function WarehouseListPage() {
         <CardContent className="grid gap-6 md:grid-cols-2 grid-cols-1">
           <div className="border rounded-lg p-4">
             <h3 className="text-lg font-semibold">Nhà kho 1</h3>
-            <p className="text-sm">Tên: {getVal("ware_house_1")}</p>
-            <p className="text-sm">Vật liệu: {getVal("material_1")}</p>
+            <p className="text-sm">Tên: {getObj("1").name}</p>
+            <p className="text-sm">Vật liệu: {getObj("1").marterial}</p>
             <div className="mt-4 flex gap-2">
               <Link href="/warehouse/1"><Button>Chi tiết</Button></Link>
             </div>
           </div>
           <div className="border rounded-lg p-4">
             <h3 className="text-lg font-semibold">Nhà kho 2</h3>
-            <p className="text-sm">Tên: {getVal("ware_house_2")}</p>
-            <p className="text-sm">Vật liệu: {getVal("material_2")}</p>
+            <p className="text-sm">Tên: {getObj("2").name}</p>
+            <p className="text-sm">Vật liệu: {getObj("2").marterial}</p>
             <div className="mt-4 flex gap-2">
               <Link href="/warehouse/2"><Button>Chi tiết</Button></Link>
             </div>

@@ -12,48 +12,26 @@ import { TbEntity } from "thingsboard-api-client";
 interface TelemetryTableProps {
   entityId: string;
   entityType: TbEntity;
-  keys: string;
+  keys: string; // "1" or "2" (JSON series)
   startTs: number;
   endTs: number;
 }
 
-const formattedData = (data: any, keys: string) => {
-  let newData = {} as any;
-  const keyList = keys.split(",");
-  for (const [key, value] of Object.entries(data)) {
-    if (typeof value == "object" && value != null) {
-      for (const [key1, value1] of Object.entries(value)) {
-        newData[value1.ts] = {
-          ...newData[value1.ts],
-          [key]: value1.value,
-        };
-      }
-    }
-  }
-  let returnData = [] as any;
-  let counter = 0;
-  for (const [key, value] of Object.entries(newData)) {
-    returnData[counter] = {
-      idx: counter,
-      ts: moment(parseFloat(key)).format("HH:mm:ss DD-MM-YYYY"),
+// Format timeseries where the value is JSON string {temp,hum,bat}
+const formattedData = (raw: any, key: string) => {
+  const series = raw?.data?.[key] ?? raw?.[key] ?? [];
+  const rows = (series as any[]).map((p: any, idx: number) => {
+    let obj: any = p.value;
+    if (typeof obj === "string") { try { obj = JSON.parse(obj); } catch {} }
+    return {
+      idx,
+      temp: obj?.temp ?? null,
+      hum: obj?.hum ?? null,
+      bat: obj?.bat ?? null,
+      ts: moment(p.ts).format("HH:mm:ss DD-MM-YYYY"),
     };
-    keyList.map((item) => {
-      returnData[counter] = {
-        ...returnData[counter],
-        [item]: null,
-      };
-    });
-    if (typeof value == "object" && value != null) {
-      for (const [key1, value1] of Object.entries(value)) {
-        returnData[counter] = {
-          ...returnData[counter],
-          [key1]: value1,
-        };
-      }
-    }
-    counter = counter + 1;
-  }
-  return returnData;
+  });
+  return rows;
 };
 
 const TelemetryTable = ({
@@ -76,20 +54,16 @@ const TelemetryTable = ({
       ),
     },
     {
-      accessorKey: "air_temp",
-      header: "Nhiệt độ không khí (°C)",
+      accessorKey: "temp",
+      header: "Nhiệt độ (°C)",
     },
     {
-      accessorKey: "air_hum",
-      header: "Độ ẩm không khí (%)",
+      accessorKey: "hum",
+      header: "Độ ẩm (%)",
     },
     {
-      accessorKey: "lux",
-      header: "Ánh sáng (lx)",
-    },
-    {
-      accessorKey: "soil_moist",
-      header: "Độ ẩm đất (%)",
+      accessorKey: "bat",
+      header: "Pin (%)",
     },
     {
       accessorKey: "ts",

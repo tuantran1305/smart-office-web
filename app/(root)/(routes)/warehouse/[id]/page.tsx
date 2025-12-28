@@ -13,26 +13,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import LatestTelemetryCard from "../../(dashboard)/components/latest-telemetry-card";
 import TelemetryTable from "../../(dashboard)/components/telemetry-table";
-import { ThermometerSun, Droplet, BatteryFull, DoorOpen, User, Lightbulb, DoorClosed } from "lucide-react";
+import TelemetryJsonChart from "../../(dashboard)/components/telemetry-json-chart";
+import { ThermometerSun, Droplet, BatteryFull, Lightbulb } from "lucide-react";
 import { config } from "@/lib/config";
 import { TbEntity } from "thingsboard-api-client";
 
 const { deviceId, tbServer } = config;
 
 const formatAttribute = (data: any) => {
-  const booleanKeys = new Set(["light_state_1","door_state_1","light_state_2","door_state_2"]);
-  const numberKeys = new Set(["air_temp","latitude_1","longitude_1","latitude_2","longitude_2"]);
   const format: Record<string, any> = {};
   Object.values(data).forEach((item: any) => {
-    const key = item["key"]; const val = item["value"];
-    if (booleanKeys.has(key)) {
-      format[key] = val === true || val === "true" || val === 1 || val === "1";
-    } else if (numberKeys.has(key)) {
-      const n = typeof val === "number" ? val : parseFloat(val);
-      format[key] = Number.isFinite(n) ? n : val;
-    } else {
-      format[key] = val;
-    }
+    format[item.key] = item.value;
   });
   return format;
 };
@@ -47,13 +38,9 @@ export default function WarehouseDetailPage() {
   const [attribute, setAttribute] = useState<any>();
   const [socketUrl, setSocketUrl] = useState("");
 
-  const latestKeys = id === "1"
-    ? ["temp_1","hum_1","bat_1","door_1","detect_1","light_state_1","door_state_1"].join(",")
-    : ["temp_2","hum_2","bat_2","light_state_2","door_state_2"].join(",");
+  const latestKeys = id === "1" ? ["1","10"].join(",") : "2"; // include PZEM key 10 for kho 1
 
-  const attrKeys = id === "1"
-    ? ["ware_house_1","latitude_1","longitude_1","material_1","air_temp","air_fan","air_mode","light_state_1","door_state_1"].join(",")
-    : ["ware_house_2","latitude_2","longitude_2","material_2","air_temp","air_fan","air_mode","light_state_2","door_state_2"].join(",");
+  const attrKeys = [id, `set-${id}`].join(",");
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -69,19 +56,18 @@ export default function WarehouseDetailPage() {
     onMessage: (event) => {
       const obj = JSON.parse(event.data).data;
       setLatestData((prev: any) => {
-        if (!prev) return prev;
-        const upd = (key: string) => obj?.[key] ? [{ ts: obj[key][0][0], value: obj[key][0][1] }] : (prev as any)[key];
-        if (id === "1") {
-          return { ...prev,
-            temp_1: upd("temp_1"), hum_1: upd("hum_1"), bat_1: upd("bat_1"),
-            door_1: upd("door_1"), detect_1: upd("detect_1"), light_state_1: upd("light_state_1"), door_state_1: upd("door_state_1"),
-          };
-        } else {
-          return { ...prev,
-            temp_2: upd("temp_2"), hum_2: upd("hum_2"), bat_2: upd("bat_2"),
-            light_state_2: upd("light_state_2"), door_state_2: upd("door_state_2"),
-          };
-        }
+        const keys = id === "1" ? ["1","10"] : ["2"];
+        let next = { ...(prev || {}) } as any;
+        keys.forEach((k) => {
+          if (obj?.[k]) {
+            const ts = obj[k][0][0];
+            const valRaw = obj[k][0][1];
+            let value: any = valRaw;
+            if (typeof valRaw === "string") { try { value = JSON.parse(valRaw); } catch {} }
+            next[k] = [{ ts, value }];
+          }
+        });
+        return next;
       });
     },
     onError: () => setSocketUrl(""),
@@ -122,11 +108,30 @@ export default function WarehouseDetailPage() {
   }, [attribute, refreshAttr]);
 
   const now = Date.now();
+  const start24h = now - 24 * 60 * 60 * 1000;
+  const tableKeys = id; // only base sensor key for table
   const table = useMemo(() => (
-    <TelemetryTable entityId={deviceId} entityType={TbEntity.DEVICE} keys={latestKeys} startTs={0} endTs={now} />
-  ), [now, latestKeys]);
+    <TelemetryTable entityId={deviceId} entityType={TbEntity.DEVICE} keys={tableKeys} startTs={0} endTs={now} />
+  ), [now, tableKeys]);
 
   const is1 = id === "1";
+
+  const sensor = useMemo(() => {
+    const pack = latestData?.[id]?.[0];
+    let val = pack?.value;
+    if (typeof val === "string") {
+      try { val = JSON.parse(val); } catch {}
+    }
+    return { ts: pack?.ts, ...val } as any;
+  }, [latestData, id]);
+
+  const pzem = useMemo(() => {
+    if (id !== "1") return null;
+    const pack = latestData?.["10"]?.[0];
+    let val = pack?.value;
+    if (typeof val === "string") { try { val = JSON.parse(val); } catch {} }
+    return { ts: pack?.ts, ...val } as any;
+  }, [latestData, id]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -137,100 +142,86 @@ export default function WarehouseDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Thông số kho {id}</CardTitle>
+          <CardTitle>Thông số cảm biến kho {id}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3 grid-cols-1">
-          {is1 ? (
-            <>
-              <LatestTelemetryCard title="Nhiệt độ" icon={<ThermometerSun className="h-8 w-8 text-red-500" />} data={latestData?.["temp_1"]?.[0]} loading={loading} unit="°C" />
-              <LatestTelemetryCard title="Độ ẩm" icon={<Droplet className="h-8 w-8 text-blue-500" />} data={latestData?.["hum_1"]?.[0]} loading={loading} unit="%" />
-              <LatestTelemetryCard title="Pin" icon={<BatteryFull className="h-8 w-8 text-green-500" />} data={latestData?.["bat_1"]?.[0]} loading={loading} unit="%" />
-              <LatestTelemetryCard title="Cửa" icon={<DoorOpen className="h-8 w-8 text-orange-500" />} data={latestData?.["door_1"]?.[0]} loading={loading} />
-              <LatestTelemetryCard title="Hiện diện" icon={<User className="h-8 w-8 text-gray-700" />} data={latestData?.["detect_1"]?.[0]} loading={loading} />
-              <LatestTelemetryCard title="Đèn" icon={<Lightbulb className="h-8 w-8 text-yellow-500" />} data={latestData?.["light_state_1"]?.[0]} loading={loading} isBoolean booleanArr={["Bật","Tắt"]} />
-              <LatestTelemetryCard title="Trạng thái cửa" icon={<DoorClosed className="h-8 w-8 text-slate-500" />} data={latestData?.["door_state_1"]?.[0]} loading={loading} isBoolean booleanArr={["Mở","Đóng"]} />
-            </>
-          ) : (
-            <>
-              <LatestTelemetryCard title="Nhiệt độ" icon={<ThermometerSun className="h-8 w-8 text-red-500" />} data={latestData?.["temp_2"]?.[0]} loading={loading} unit="°C" />
-              <LatestTelemetryCard title="Độ ẩm" icon={<Droplet className="h-8 w-8 text-blue-500" />} data={latestData?.["hum_2"]?.[0]} loading={loading} unit="%" />
-              <LatestTelemetryCard title="Pin" icon={<BatteryFull className="h-8 w-8 text-green-500" />} data={latestData?.["bat_2"]?.[0]} loading={loading} unit="%" />
-              {attribute?.["light_state_2"] !== undefined && (
-                <LatestTelemetryCard title="Đèn" icon={<Lightbulb className="h-8 w-8 text-yellow-500" />} data={{ value: attribute?.["light_state_2"] }} loading={loading} isBoolean booleanArr={["Bật","Tắt"]} />
-              )}
-              {attribute?.["door_state_2"] !== undefined && (
-                <LatestTelemetryCard title="Trạng thái cửa" icon={<DoorClosed className="h-8 w-8 text-slate-500" />} data={{ value: attribute?.["door_state_2"] }} loading={loading} isBoolean booleanArr={["Mở","Đóng"]} />
-              )}
-            </>
-          )}
+          <LatestTelemetryCard title="Nhiệt độ" icon={<ThermometerSun className="h-8 w-8 text-red-500" />} data={{ ts: sensor?.ts, value: sensor?.temp }} loading={loading} unit="°C" />
+          <LatestTelemetryCard title="Độ ẩm" icon={<Droplet className="h-8 w-8 text-blue-500" />} data={{ ts: sensor?.ts, value: sensor?.hum }} loading={loading} unit="%" />
+          <LatestTelemetryCard title="Pin" icon={<BatteryFull className="h-8 w-8 text-green-500" />} data={{ ts: sensor?.ts, value: sensor?.bat }} loading={loading} unit="%" />
         </CardContent>
       </Card>
 
+      {is1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Thông tin cảm biến PZEM (Kho 1)</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-4 grid-cols-1">
+            <LatestTelemetryCard title="Điện áp" icon={<ThermometerSun className="h-8 w-8 text-slate-600" />} data={{ ts: pzem?.ts, value: pzem?.voltage }} loading={loading} unit=" V" />
+            <LatestTelemetryCard title="Dòng điện" icon={<Droplet className="h-8 w-8 text-slate-600" />} data={{ ts: pzem?.ts, value: pzem?.current }} loading={loading} unit=" A" />
+            <LatestTelemetryCard title="Công suất" icon={<BatteryFull className="h-8 w-8 text-slate-600" />} data={{ ts: pzem?.ts, value: pzem?.power }} loading={loading} unit=" W" />
+            <LatestTelemetryCard title="Điện năng" icon={<Lightbulb className="h-8 w-8 text-slate-600" />} data={{ ts: pzem?.ts, value: pzem?.energy }} loading={loading} unit=" kWh" />
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
-          <CardTitle>Cấu hình máy lạnh & điều khiển</CardTitle>
+          <CardTitle>Cấu hình thiết bị kho {id}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-6 md:grid-cols-3 grid-cols-1">
           <div className="flex flex-col gap-2">
-            <Label>air_temp (°C)</Label>
-            <Input type="number" value={attribute?.["air_temp"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, air_temp: parseInt(e.target.value) }))} />
-            <Button onClick={() => saveAttr({ air_temp: parseInt(attribute?.["air_temp"] ?? 0) }, "Đã đặt nhiệt độ")}>Lưu</Button>
+            <Label>Nhiệt độ đặt (temp)</Label>
+            <Input type="number" value={attribute?.[`set-${id}`]?.temp ?? ""}
+              onChange={(e) => setAttribute((a:any) => ({ ...a, [`set-${id}`]: { ...(a?.[`set-${id}`]||{}), temp: parseFloat(e.target.value) } }))} />
           </div>
           <div className="flex flex-col gap-2">
-            <Label>air_fan</Label>
-            <Select value={(attribute?.["air_fan"] ?? "").toString()} onValueChange={(v) => setAttribute((a:any) => ({ ...a, air_fan: parseInt(v) }))}>
-              <SelectTrigger><SelectValue placeholder="Chọn tốc độ" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">low (1)</SelectItem>
-                <SelectItem value="2">medium (2)</SelectItem>
-                <SelectItem value="3">high (3)</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button onClick={() => saveAttr({ air_fan: parseInt(attribute?.["air_fan"] ?? 1) }, "Đã đặt tốc độ quạt")}>Lưu</Button>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>air_mode</Label>
-            <Select value={(attribute?.["air_mode"] ?? "").toString()} onValueChange={(v) => setAttribute((a:any) => ({ ...a, air_mode: parseInt(v) }))}>
+            <Label>Chế độ (mode)</Label>
+            <Select value={(attribute?.[`set-${id}`]?.mode ?? "").toString()}
+              onValueChange={(v) => setAttribute((a:any) => ({ ...a, [`set-${id}`]: { ...(a?.[`set-${id}`]||{}), mode: parseInt(v) } }))}>
               <SelectTrigger><SelectValue placeholder="Chọn chế độ" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="1">cool</SelectItem>
-                <SelectItem value="2">dry</SelectItem>
-                <SelectItem value="3">fan</SelectItem>
-                <SelectItem value="4">auto</SelectItem>
-                <SelectItem value="5">heat</SelectItem>
+                <SelectItem value="0">0</SelectItem>
+                <SelectItem value="1">1</SelectItem>
+                <SelectItem value="2">2</SelectItem>
+                <SelectItem value="3">3</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={() => saveAttr({ air_mode: parseInt(attribute?.["air_mode"] ?? 1) }, "Đã đặt chế độ")}>Lưu</Button>
           </div>
-
-          {/* Toggle light/door per warehouse if attribute exists */}
-          {is1 ? (
-            <>
-              <div className="flex flex-col gap-2">
-                <Label>Đèn kho 1 (light_state_1)</Label>
-                <Button onClick={() => saveAttr({ light_state_1: !attribute?.["light_state_1"] }, "Đã cập nhật đèn")}>{attribute?.["light_state_1"] ? "Tắt" : "Bật"}</Button>
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label>Cửa kho 1 (door_state_1)</Label>
-                <Button onClick={() => saveAttr({ door_state_1: !attribute?.["door_state_1"] }, "Đã cập nhật cửa")}>{attribute?.["door_state_1"] ? "Đóng" : "Mở"}</Button>
-              </div>
-            </>
-          ) : (
-            <>
-              {attribute?.["light_state_2"] !== undefined && (
-                <div className="flex flex-col gap-2">
-                  <Label>Đèn kho 2 (light_state_2)</Label>
-                  <Button onClick={() => saveAttr({ light_state_2: !attribute?.["light_state_2"] }, "Đã cập nhật đèn")}>{attribute?.["light_state_2"] ? "Tắt" : "Bật"}</Button>
-                </div>
-              )}
-              {attribute?.["door_state_2"] !== undefined && (
-                <div className="flex flex-col gap-2">
-                  <Label>Cửa kho 2 (door_state_2)</Label>
-                  <Button onClick={() => saveAttr({ door_state_2: !attribute?.["door_state_2"] }, "Đã cập nhật cửa")}>{attribute?.["door_state_2"] ? "Đóng" : "Mở"}</Button>
-                </div>
-              )}
-            </>
-          )}
+          <div className="flex flex-col gap-2">
+            <Label>Tốc độ quạt (fan)</Label>
+            <Select value={(attribute?.[`set-${id}`]?.fan ?? "").toString()}
+              onValueChange={(v) => setAttribute((a:any) => ({ ...a, [`set-${id}`]: { ...(a?.[`set-${id}`]||{}), fan: parseInt(v) } }))}>
+              <SelectTrigger><SelectValue placeholder="Chọn tốc độ" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">0</SelectItem>
+                <SelectItem value="1">1</SelectItem>
+                <SelectItem value="2">2</SelectItem>
+                <SelectItem value="3">3</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>Đèn (light)</Label>
+            <Button onClick={() => setAttribute((a:any) => ({ ...a, [`set-${id}`]: { ...(a?.[`set-${id}`]||{}), light: !(a?.[`set-${id}`]?.light) } }))}>
+              {(attribute?.[`set-${id}`]?.light ? "Tắt" : "Bật")}
+            </Button>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>Cửa (door)</Label>
+            <Button onClick={() => setAttribute((a:any) => ({ ...a, [`set-${id}`]: { ...(a?.[`set-${id}`]||{}), door: !(a?.[`set-${id}`]?.door) } }))}>
+              {(attribute?.[`set-${id}`]?.door ? "Đóng" : "Mở")}
+            </Button>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>Nguồn (power)</Label>
+            <Button onClick={() => setAttribute((a:any) => ({ ...a, [`set-${id}`]: { ...(a?.[`set-${id}`]||{}), power: !(a?.[`set-${id}`]?.power) } }))}>
+              {(attribute?.[`set-${id}`]?.power ? "Tắt" : "Bật")}
+            </Button>
+          </div>
+          <div className="flex items-end">
+            <Button onClick={() => saveAttr({ [`set-${id}`]: attribute?.[`set-${id}`] }, "Đã lưu cấu hình")}>Lưu cấu hình</Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -238,53 +229,53 @@ export default function WarehouseDetailPage() {
         <CardHeader>
           <CardTitle>Thông tin Nhà kho {id}</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {is1 ? (
-            <div className="grid md:grid-cols-2 grid-cols-1 gap-3">
-              <div>
-                <Label>Tên</Label>
-                <Input value={attribute?.["ware_house_1"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, ware_house_1: e.target.value }))} />
-              </div>
-              <div>
-                <Label>Vật liệu bảo quản</Label>
-                <Input value={attribute?.["material_1"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, material_1: e.target.value }))} />
-              </div>
-              <div>
-                <Label>Latitude</Label>
-                <Input type="number" value={attribute?.["latitude_1"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, latitude_1: parseFloat(e.target.value) }))} />
-              </div>
-              <div>
-                <Label>Longitude</Label>
-                <Input type="number" value={attribute?.["longitude_1"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, longitude_1: parseFloat(e.target.value) }))} />
-              </div>
-              <Button onClick={() => saveAttr({ ware_house_1: attribute?.["ware_house_1"], material_1: attribute?.["material_1"], latitude_1: attribute?.["latitude_1"], longitude_1: attribute?.["longitude_1"] }, "Đã lưu kho 1")}>Lưu kho 1</Button>
-            </div>
-          ) : (
-            <div className="grid md:grid-cols-2 grid-cols-1 gap-3">
-              <div>
-                <Label>Tên</Label>
-                <Input value={attribute?.["ware_house_2"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, ware_house_2: e.target.value }))} />
-              </div>
-              <div>
-                <Label>Vật liệu bảo quản</Label>
-                <Input value={attribute?.["material_2"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, material_2: e.target.value }))} />
-              </div>
-              <div>
-                <Label>Latitude</Label>
-                <Input type="number" value={attribute?.["latitude_2"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, latitude_2: parseFloat(e.target.value) }))} />
-              </div>
-              <div>
-                <Label>Longitude</Label>
-                <Input type="number" value={attribute?.["longitude_2"] ?? ""} onChange={(e) => setAttribute((a:any) => ({ ...a, longitude_2: parseFloat(e.target.value) }))} />
-              </div>
-              <Button onClick={() => saveAttr({ ware_house_2: attribute?.["ware_house_2"], material_2: attribute?.["material_2"], latitude_2: attribute?.["latitude_2"], longitude_2: attribute?.["longitude_2"] }, "Đã lưu kho 2")}>Lưu kho 2</Button>
-            </div>
-          )}
+        <CardContent className="grid md:grid-cols-2 grid-cols-1 gap-3">
+          <div>
+            <Label>Tên (name)</Label>
+            <Input value={attribute?.[id]?.name ?? ""}
+              onChange={(e) => setAttribute((a:any) => ({ ...a, [id]: { ...(a?.[id] || {}), name: e.target.value } }))} />
+          </div>
+          <div>
+            <Label>Vật liệu (marterial)</Label>
+            <Input value={attribute?.[id]?.marterial ?? ""}
+              onChange={(e) => setAttribute((a:any) => ({ ...a, [id]: { ...(a?.[id] || {}), marterial: e.target.value } }))} />
+          </div>
+          <div>
+            <Label>Latitude</Label>
+            <Input type="number" value={attribute?.[id]?.latitude ?? ""}
+              onChange={(e) => setAttribute((a:any) => ({ ...a, [id]: { ...(a?.[id] || {}), latitude: parseFloat(e.target.value) } }))} />
+          </div>
+          <div>
+            <Label>Longitude</Label>
+            <Input type="number" value={attribute?.[id]?.longitude ?? ""}
+              onChange={(e) => setAttribute((a:any) => ({ ...a, [id]: { ...(a?.[id] || {}), longitude: parseFloat(e.target.value) } }))} />
+          </div>
+          <div className="col-span-full">
+            <Button onClick={() => saveAttr({ [id]: attribute?.[id] }, "Đã lưu thông tin kho")}>Lưu thông tin kho</Button>
+          </div>
         </CardContent>
       </Card>
 
       {/* Bảng dữ liệu */}
       {table}
+
+      {/* Biểu đồ Temp & Hum */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Biểu đồ nhiệt độ</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TelemetryJsonChart entityId={deviceId} entityType={TbEntity.DEVICE} keyId={id} field="temp" label={`Temp kho ${id}`} startTs={start24h} endTs={now} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Biểu đồ độ ẩm</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TelemetryJsonChart entityId={deviceId} entityType={TbEntity.DEVICE} keyId={id} field="hum" label={`Hum kho ${id}`} startTs={start24h} endTs={now} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
